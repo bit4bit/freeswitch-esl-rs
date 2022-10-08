@@ -3,6 +3,7 @@ use std::io::{Read, Write, BufReader};
 
 use std::collections::HashMap;
 
+// Pdu (Packet data unit) from Freeswitch mod_event_socket.
 #[derive(Debug)]
 pub struct Pdu {
     header: HashMap<String, String>,
@@ -12,13 +13,15 @@ pub struct Pdu {
 
 #[derive(Debug)]
 pub enum PduError {
-    IOError(io::Error)
+    IOError(io::Error),
+    StrError(str::Utf8Error)
 }
 
 impl fmt::Display for PduError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PduError::IOError(e) => write!(f, "{}", e)
+            PduError::IOError(e) => write!(f, "{}", e),
+            PduError::StrError(e) => write!(f, "{}", e)
         }
     }
 }
@@ -26,7 +29,8 @@ impl fmt::Display for PduError {
 impl error::Error for PduError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
-            PduError::IOError(e) => Some(e)
+            PduError::IOError(e) => Some(e),
+            PduError::StrError(e) => Some(e)
         }
     }
 }
@@ -37,8 +41,36 @@ impl From<io::Error> for PduError {
     }
 }
 
+impl From<str::Utf8Error> for PduError {
+    fn from(e: str::Utf8Error) -> Self {
+        PduError::StrError(e)
+    }
+}
+
+// casting to another type
+pub trait FromPdu: Sized {
+    type Err;
+
+    fn from_pdu(pdu: &Pdu) -> Result<Self, Self::Err>;
+}
+
+// Get Pdu content as String
+impl FromPdu for String {
+    type Err = PduError;
+    
+    fn from_pdu(pdu: &Pdu) -> Result<Self, Self::Err> {
+        let content: String = str::from_utf8(&pdu.content)?.to_string();
+        Ok(content)
+    }
+}
+
 impl Pdu {
-    fn parse(reader: &mut impl io::BufRead) -> Result<Pdu, PduError> {
+    // Parse Pdu to another type.
+    pub fn parse<F: FromPdu>(&self) -> Result<F, F::Err> {
+        FromPdu::from_pdu(self)
+    }
+
+    fn build(reader: &mut impl io::BufRead) -> Result<Pdu, PduError> {
         let mut pdu = Pdu {
             header: HashMap::new(),
             content: Vec::new()
@@ -131,8 +163,7 @@ impl<C: Read + Write> Connection<C> {
     }
 }
 
-
-
+// Implement protocol Freeswitch mod_event_socket
 pub struct Client<T: Write + Read> {
     connection: Connection<T>,
     event_queue: Vec<Pdu>
@@ -148,7 +179,7 @@ impl<T: Read + Write> Client<T> {
 
     pub fn pull_event(&mut self) -> Result<Pdu, PduError> {
         loop {
-            let pdu = Pdu::parse(self.connection.reader())?;
+            let pdu = Pdu::build(self.connection.reader())?;
             
             if pdu.header["Content-Type"] == "text/event-plain" {
                 return Ok(pdu);
@@ -170,12 +201,12 @@ impl<T: Read + Write> Client<T> {
     }
 
     pub fn auth(&mut self, pass: &str) -> Result<(), &'static str> {
-        let pdu = Pdu::parse(self.connection.reader()).unwrap();
+        let pdu = Pdu::build(self.connection.reader()).unwrap();
         
         if pdu.header["Content-Type"] == "auth/request" {
             self.send_command(format_args!("auth {}", pass)).unwrap();
 
-            let pdu = Pdu::parse(self.connection.reader()).unwrap();
+            let pdu = Pdu::build(self.connection.reader()).unwrap();
             if pdu.header["Reply-Text"] == "+OK accepted" {
                 Ok(())
             } else {
@@ -188,7 +219,7 @@ impl<T: Read + Write> Client<T> {
 
     fn wait_for_response(&mut self, content_type: &str) -> Result<Pdu, PduError> {
         loop {
-            let pdu = Pdu::parse(self.connection.reader())?;
+            let pdu = Pdu::build(self.connection.reader())?;
             if pdu.header["Content-Type"] == content_type {
                 return Ok(pdu)
             } else {
@@ -236,12 +267,14 @@ mod tests {
             )
         )).unwrap();
         protocol.set_position(0);
-
         let conn = Connection::new(&mut protocol);
         let mut client = Client::new(conn);
 
         let pdu = client.api("uptime", "")?;
-        assert_eq!("999666", str::from_utf8(&pdu.content).unwrap());
+
+        let response: String = pdu.parse()?;
+        assert_eq!("999666", response);
+
         Ok(())
     }
 }
