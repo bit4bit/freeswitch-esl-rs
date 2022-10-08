@@ -38,7 +38,7 @@ impl From<io::Error> for PduError {
 }
 
 impl Pdu {
-    pub fn parse(reader: &mut impl io::BufRead) -> Result<Pdu, PduError> {
+    fn parse(reader: &mut impl io::BufRead) -> Result<Pdu, PduError> {
         let mut pdu = Pdu {
             header: HashMap::new(),
             content: Vec::new()
@@ -220,6 +220,28 @@ mod tests {
         let mut client = Client::new(conn);
 
         client.auth("test")?;
+        Ok(())
+    }
+
+    #[test]
+    fn it_call_api() -> Result<(), PduError> {
+        use std::io::Cursor;
+        let mut protocol = Cursor::new(vec![0; 512]);
+        protocol.write_fmt(format_args!("api uptime \n\n")).unwrap();
+        protocol.write_fmt(format_args!(
+            concat!(
+                "Content-Type: api/response\n",
+                "Content-Length: 6\n\n",
+                "999666"
+            )
+        )).unwrap();
+        protocol.set_position(0);
+
+        let conn = Connection::new(&mut protocol);
+        let mut client = Client::new(conn);
+
+        let pdu = client.api("uptime", "")?;
+        assert_eq!("999666", str::from_utf8(&pdu.content).unwrap());
         Ok(())
     }
 }
