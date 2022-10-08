@@ -255,6 +255,20 @@ mod tests {
     }
 
     #[test]
+    fn it_invalid_authentication() {
+        use std::io::Cursor;
+        let mut protocol = Cursor::new(vec![0; 512]);
+        protocol.write_fmt(format_args!("Content-Type: auth/request\n\n")).unwrap();
+        protocol.write_fmt(format_args!("Reply-Text: -ERR invalid\n\n")).unwrap();
+        protocol.set_position(0);
+
+        let conn = Connection::new(&mut protocol);
+        let mut client = Client::new(conn);
+
+        assert_eq!("fails to authenticate", client.auth("test").unwrap_err());
+    }
+
+    #[test]
     fn it_call_api() -> Result<(), PduError> {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
