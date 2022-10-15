@@ -1,4 +1,5 @@
 extern crate queues;
+extern crate urldecode;
 
 use std::{io, str, error, fmt};
 use std::io::{Read, Write, BufReader};
@@ -66,6 +67,27 @@ impl FromPdu for String {
     }
 }
 
+type Header = HashMap<String, String>;
+
+fn header_parse(content: String) -> Header {
+    let mut header = Header::new();
+
+    content
+        .split("\n")
+        .filter(|line| {
+            line.bytes().count() > 0
+        })
+        .for_each(|line| {
+            let mut item = line.splitn(2, ":");
+            let key = item.next().unwrap().trim().to_string();
+            let value = item.next().unwrap().trim().to_string();
+
+            header.insert(key, urldecode::decode(value));
+        });
+
+    header
+}
+
 impl Pdu {
     // Parse Pdu to another type.
     pub fn parse<F: FromPdu>(&self) -> Result<F, F::Err> {
@@ -110,22 +132,7 @@ impl Pdu {
     fn parse_header(&mut self, reader: &mut impl io::BufRead) -> io::Result<()> {
         let raw = self.get_header_content(reader)?;
         let raw_str = String::from_utf8(raw).unwrap();
-        let parts = raw_str
-            .split("\n")
-            .filter(|line| {
-                line.bytes().count() > 0
-            })
-            .map(|line| {
-                let mut item = line.splitn(2, ":");
-                let key = item.next().unwrap();
-                let value = item.next().unwrap();
-
-                (key.trim(), value.trim()) 
-            });
-        
-        for (key, value) in parts {
-            self.header.insert(key.to_string(), value.to_string());
-        }
+        self.header = header_parse(raw_str);
 
         Ok(())
     }
