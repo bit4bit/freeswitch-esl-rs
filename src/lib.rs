@@ -1,10 +1,12 @@
+extern crate queues;
+
 use std::{io, str, error, fmt};
 use std::io::{Read, Write, BufReader};
-
+use queues::{CircularBuffer, Queue, IsQueue};
 use std::collections::HashMap;
 
 // Pdu (Packet data unit) from Freeswitch mod_event_socket.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Pdu {
     header: HashMap<String, String>,
     // TODO: no pub
@@ -166,23 +168,29 @@ impl<C: Read + Write> Connection<C> {
 // Implement protocol Freeswitch mod_event_socket
 pub struct Client<T: Write + Read> {
     connection: Connection<T>,
-    event_queue: Vec<Pdu>
+    api_response: Queue<Pdu>,
+    events: CircularBuffer<Pdu>
 }
 
 impl<T: Read + Write> Client<T> {
     pub fn new(connection: Connection<T>) -> Self {
         Self{
             connection,
-            event_queue: Vec::new()
+            api_response: Queue::new(),
+            events: CircularBuffer::new(1024 * 1024)
         }
     }
 
+   
     pub fn pull_event(&mut self) -> Result<Pdu, PduError> {
         loop {
-            let pdu = Pdu::build(self.connection.reader())?;
-            
-            if pdu.header["Content-Type"] == "text/event-plain" {
-                return Ok(pdu);
+            self.pull_pdu();
+
+            match self.events.remove() {
+                Ok(pdu) => {
+                    return Ok(pdu);
+                },
+                _ => {}
             }
         }
     }
@@ -195,7 +203,7 @@ impl<T: Read + Write> Client<T> {
     pub fn api(&mut self, cmd: &str, arg: &str) -> Result<Pdu, PduError> {
         self.send_command(format_args!("api {} {}", cmd, arg))?;
 
-        let pdu = self.wait_for_response("api/response")?;
+        let pdu = self.wait_for_api_response()?;
 
         Ok(pdu)
     }
@@ -217,13 +225,15 @@ impl<T: Read + Write> Client<T> {
         }
     }
 
-    fn wait_for_response(&mut self, content_type: &str) -> Result<Pdu, PduError> {
+    fn wait_for_api_response(&mut self) -> Result<Pdu, PduError> {
         loop {
-            let pdu = Pdu::build(self.connection.reader())?;
-            if pdu.header["Content-Type"] == content_type {
-                return Ok(pdu)
-            } else {
-                self.event_queue.push(pdu);
+            self.pull_pdu();
+
+            match self.api_response.remove() {
+                Ok(pdu) => {
+                        return Ok(pdu)
+                },
+                _ => {}
             }
         }
     }
@@ -232,6 +242,20 @@ impl<T: Read + Write> Client<T> {
         self.connection.get_mut().write(format!("{}\n\n", cmd).as_bytes())?;
         self.connection.get_mut().flush()?;
         Ok(())
+    }
+
+    fn pull_pdu(&mut self) {
+        let pdu = Pdu::build(self.connection.reader()).expect("fails to read pdu");
+
+        if pdu.header["Content-Type"] == "api/response" {
+            self.api_response.add(pdu)
+                .expect("fails to add to api response");
+        } else if pdu.header["Content-Type"] == "text/event-plain" {
+            self.events.add(pdu)
+                .expect("fails to add event");
+        } else {
+            eprintln!("please implement handler for: {}", pdu.header["Content-Type"]);
+        }
     }
 }
 
