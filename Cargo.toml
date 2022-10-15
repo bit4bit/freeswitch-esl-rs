@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 queues = "1.0.2"
+urldecode = "0.1.1"
