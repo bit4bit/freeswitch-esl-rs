@@ -6,6 +6,8 @@ use std::io::{Read, Write, BufReader};
 use queues::{CircularBuffer, Queue, IsQueue};
 use std::collections::HashMap;
 
+const EVENT_QUEUE_SIZE: usize = 100_000;
+
 // Pdu (Packet data unit) from Freeswitch mod_event_socket.
 #[derive(Debug, Clone)]
 pub struct Pdu {
@@ -215,7 +217,7 @@ impl<T: Read + Write> Client<T> {
             connection,
             api_response: Queue::new(),
             command_reply: Queue::new(),
-            events: CircularBuffer::new(1024 * 1024)
+            events: CircularBuffer::new(EVENT_QUEUE_SIZE)
         }
     }
 
