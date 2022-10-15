@@ -179,6 +179,7 @@ impl<C: Read + Write> Connection<C> {
     }
 }
 
+#[derive(Debug)]
 pub struct Event {
     header: Header
 }
