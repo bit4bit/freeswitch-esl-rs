@@ -94,6 +94,13 @@ impl Pdu {
         FromPdu::from_pdu(self)
     }
 
+    pub fn get(&self, k: &str) -> String {
+        match self.header.get(k) {
+            Some(v) => v.to_string(),
+            None => "".to_string()
+        }
+    }
+
     fn build(reader: &mut impl io::BufRead) -> Result<Pdu, PduError> {
         let mut pdu = Pdu {
             header: HashMap::new(),
@@ -172,6 +179,27 @@ impl<C: Read + Write> Connection<C> {
     }
 }
 
+pub struct Event {
+    header: Header
+}
+
+impl Event {
+    pub fn fetch(&self, k: &str) -> Option<&String> {
+        self.header.get(k)
+    }
+
+    fn from_pdu(pdu: &Pdu) -> Result<Self, PduError> {
+        if pdu.get("Content-Type") == "text/event-plain" {
+            let content = String::from(str::from_utf8(&pdu.content)?);
+            let header = header_parse(content);
+            Ok(Event{header: header})
+        } else {
+            panic!("invalid content-type expected text/event-plain,");
+        }
+    }
+
+}
+
 // Implement protocol Freeswitch mod_event_socket
 pub struct Client<T: Write + Read> {
     connection: Connection<T>,
@@ -189,13 +217,14 @@ impl<T: Read + Write> Client<T> {
     }
 
    
-    pub fn pull_event(&mut self) -> Result<Pdu, PduError> {
+    pub fn pull_event(&mut self) -> Result<Event, PduError> {
         loop {
             self.pull_pdu();
 
             match self.events.remove() {
                 Ok(pdu) => {
-                    return Ok(pdu);
+                    let event: Event = Event::from_pdu(&pdu)?;
+                    return Ok(event);
                 },
                 _ => {}
             }
@@ -253,15 +282,19 @@ impl<T: Read + Write> Client<T> {
 
     fn pull_pdu(&mut self) {
         let pdu = Pdu::build(self.connection.reader()).expect("fails to read pdu");
+        let content_type = match pdu.header.get("Content-Type") {
+            Some(v) => v,
+            None => ""
+        };
 
-        if pdu.header["Content-Type"] == "api/response" {
+        if content_type == "api/response" {
             self.api_response.add(pdu)
                 .expect("fails to add to api response");
-        } else if pdu.header["Content-Type"] == "text/event-plain" {
+        } else if content_type == "text/event-plain" {
             self.events.add(pdu)
                 .expect("fails to add event");
         } else {
-            eprintln!("please implement handler for: {}", pdu.header["Content-Type"]);
+            eprintln!("please implement handler for: {}", content_type);
         }
     }
 }
@@ -319,6 +352,44 @@ mod tests {
 
         let response: String = pdu.parse()?;
         assert_eq!("999666", response);
+
+        Ok(())
+    }
+
+    #[test]
+    fn it_pull_event() -> Result<(), PduError> {
+        use std::io::Cursor;
+        let mut protocol = Cursor::new(vec![0; 512]);
+        protocol.write_fmt(format_args!("
+Content-Length: 526
+Content-Type: text/event-plain
+
+Event-Name: API
+Core-UUID: 2379c0b2-d1a9-465b-bdc6-ca55275e591b
+FreeSWITCH-Hostname: dafa872b4e1a
+FreeSWITCH-Switchname: 16.20.0.9
+FreeSWITCH-IPv4: 16.20.0.9
+FreeSWITCH-IPv6: %3A%3A1
+Event-Date-Local: 2022-10-15%2015%3A32%3A56
+Event-Date-GMT: Sat,%2015%20Oct%202022%2015%3A32%3A56%20GMT
+Event-Date-Timestamp: 1665847976799920
+Event-Calling-File: switch_loadable_module.c
+Event-Calling-Function: switch_api_execute
+Event-Calling-Line-Number: 2949
+Event-Sequence: 5578
+API-Command: show
+API-Command-Argument: calls%20as%20json
+
+")).unwrap();
+        protocol.set_position(0);
+
+        let conn = Connection::new(&mut protocol);
+        let mut client = Client::new(conn);
+
+        let event: Event = client.pull_event()?;
+
+        assert_eq!("API", event.fetch("Event-Name").unwrap());
+        assert_eq!("show", event.fetch("API-Command").unwrap());
 
         Ok(())
     }
