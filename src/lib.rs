@@ -205,6 +205,7 @@ impl Event {
 pub struct Client<T: Write + Read> {
     connection: Connection<T>,
     api_response: Queue<Pdu>,
+    command_reply: Queue<Pdu>,
     events: CircularBuffer<Pdu>
 }
 
@@ -213,6 +214,7 @@ impl<T: Read + Write> Client<T> {
         Self{
             connection,
             api_response: Queue::new(),
+            command_reply: Queue::new(),
             events: CircularBuffer::new(1024 * 1024)
         }
     }
@@ -234,6 +236,9 @@ impl<T: Read + Write> Client<T> {
 
     pub fn event(&mut self, event: &str) -> Result<(), PduError> {
         self.send_command(format_args!("event plain {}", event))?;
+
+        self.wait_for_command_reply()?;
+        
         Ok(())
     }
     
@@ -251,7 +256,8 @@ impl<T: Read + Write> Client<T> {
         if pdu.header["Content-Type"] == "auth/request" {
             self.send_command(format_args!("auth {}", pass)).unwrap();
 
-            let pdu = Pdu::build(self.connection.reader()).unwrap();
+            let pdu = self.wait_for_command_reply().unwrap();
+
             if pdu.header["Reply-Text"] == "+OK accepted" {
                 Ok(())
             } else {
@@ -267,6 +273,19 @@ impl<T: Read + Write> Client<T> {
             self.pull_pdu();
 
             match self.api_response.remove() {
+                Ok(pdu) => {
+                        return Ok(pdu)
+                },
+                _ => {}
+            }
+        }
+    }
+
+    fn wait_for_command_reply(&mut self) -> Result<Pdu, PduError> {
+        loop {
+            self.pull_pdu();
+
+            match self.command_reply.remove() {
                 Ok(pdu) => {
                         return Ok(pdu)
                 },
@@ -294,8 +313,11 @@ impl<T: Read + Write> Client<T> {
         } else if content_type == "text/event-plain" {
             self.events.add(pdu)
                 .expect("fails to add event");
+        } else if content_type == "command/reply" {
+            self.command_reply.add(pdu)
+                .expect("fails to add pdu to command_reply");
         } else {
-            eprintln!("please implement handler for: {}", content_type);
+            eprintln!("unhandle content {:?}", pdu);
         }
     }
 }
@@ -309,7 +331,7 @@ mod tests {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
         protocol.write_fmt(format_args!("Content-Type: auth/request\n\n")).unwrap();
-        protocol.write_fmt(format_args!("Reply-Text: +OK accepted\n\n")).unwrap();
+        protocol.write_fmt(format_args!("Content-Type: command/reply\nReply-Text: +OK accepted\n\n")).unwrap();
         protocol.set_position(0);
 
         let conn = Connection::new(&mut protocol);
@@ -324,7 +346,7 @@ mod tests {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
         protocol.write_fmt(format_args!("Content-Type: auth/request\n\n")).unwrap();
-        protocol.write_fmt(format_args!("Reply-Text: -ERR invalid\n\n")).unwrap();
+        protocol.write_fmt(format_args!("Content-Type: command/reply\nReply-Text: -ERR invalid\n\n")).unwrap();
         protocol.set_position(0);
 
         let conn = Connection::new(&mut protocol);
