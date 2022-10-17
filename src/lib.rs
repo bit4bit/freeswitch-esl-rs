@@ -9,7 +9,7 @@ use std::collections::HashMap;
 const EVENT_QUEUE_SIZE: usize = 100_000;
 
 // Pdu (Packet data unit) from Freeswitch mod_event_socket.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Pdu {
     header: HashMap<String, String>,
     // TODO: no pub
@@ -181,14 +181,14 @@ impl<C: Read + Write> Connection<C> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Event {
-    header: Header
+    inner: Header
 }
 
 impl Event {
-    pub fn fetch(&self, k: &str) -> Option<&String> {
-        self.header.get(k)
+    pub fn get(&self, k: &str) -> Option<&String> {
+        self.inner.get(k)
     }
 }
 
@@ -199,7 +199,7 @@ impl FromPdu for Event {
         if pdu.get("Content-Type") == "text/event-plain" {
             let content = String::from(str::from_utf8(&pdu.content)?);
             let header = header_parse(content);
-            Ok(Event{header: header})
+            Ok(Event{inner: header})
         } else {
             panic!("invalid content-type expected text/event-plain,");
         }
@@ -417,8 +417,8 @@ API-Command-Argument: calls%20as%20json
 
         let event: Event = client.pull_event()?;
 
-        assert_eq!("API", event.fetch("Event-Name").unwrap());
-        assert_eq!("show", event.fetch("API-Command").unwrap());
+        assert_eq!("API", event.get("Event-Name").unwrap());
+        assert_eq!("show", event.get("API-Command").unwrap());
 
         Ok(())
     }
