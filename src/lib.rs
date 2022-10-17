@@ -9,7 +9,7 @@ use std::collections::HashMap;
 const EVENT_QUEUE_SIZE: usize = 100_000;
 
 // Pdu (Packet data unit) from Freeswitch mod_event_socket.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pdu {
     header: HashMap<String, String>,
     // TODO: no pub
@@ -75,12 +75,12 @@ fn header_parse(content: String) -> Header {
     let mut header = Header::new();
 
     content
-        .split("\n")
+        .split('\n')
         .filter(|line| {
-            line.bytes().count() > 0
+            !line.is_empty()
         })
         .for_each(|line| {
-            let mut item = line.splitn(2, ":");
+            let mut item = line.splitn(2, ':');
             let key = item.next().unwrap().trim().to_string();
             let value = item.next().unwrap().trim().to_string();
 
@@ -181,7 +181,7 @@ impl<C: Read + Write> Connection<C> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
     inner: Header
 }
@@ -230,12 +230,9 @@ impl<T: Read + Write> Client<T> {
         loop {
             self.pull_pdu();
 
-            match self.events.remove() {
-                Ok(pdu) => {
-                    let event: Event = pdu.parse()?;
-                    return Ok(event);
-                },
-                _ => {}
+            if let Ok(pdu) = self.events.remove() {
+                let event: Event = pdu.parse()?;
+                return Ok(event);
             }
         }
     }
@@ -278,11 +275,8 @@ impl<T: Read + Write> Client<T> {
         loop {
             self.pull_pdu();
 
-            match self.api_response.remove() {
-                Ok(pdu) => {
-                        return Ok(pdu)
-                },
-                _ => {}
+            if let Ok(pdu) = self.api_response.remove() {
+                return Ok(pdu)
             }
         }
     }
@@ -291,17 +285,14 @@ impl<T: Read + Write> Client<T> {
         loop {
             self.pull_pdu();
 
-            match self.command_reply.remove() {
-                Ok(pdu) => {
-                        return Ok(pdu)
-                },
-                _ => {}
+            if let Ok(pdu) = self.command_reply.remove() {
+                return Ok(pdu)
             }
         }
     }
 
     fn send_command(&mut self, cmd: std::fmt::Arguments) -> io::Result<()> {
-        self.connection.get_mut().write(format!("{}\n\n", cmd).as_bytes())?;
+        self.connection.get_mut().write_fmt(format_args!("{}\n\n", cmd))?;
         self.connection.get_mut().flush()?;
         Ok(())
     }
