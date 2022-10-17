@@ -92,11 +92,11 @@ fn header_parse(content: String) -> Header {
 
 impl Pdu {
     // Parse Pdu to another type.
-    pub fn parse<F: FromPdu>(&self) -> Result<F, F::Err> {
+    fn parse<F: FromPdu>(&self) -> Result<F, F::Err> {
         FromPdu::from_pdu(self)
     }
 
-    pub fn get(&self, k: &str) -> String {
+    fn get(&self, k: &str) -> String {
         match self.header.get(k) {
             Some(v) => v.to_string(),
             None => "".to_string()
