@@ -228,7 +228,7 @@ impl<T: Read + Write> Client<T> {
    
     pub fn pull_event(&mut self) -> Result<Event, PduError> {
         loop {
-            self.pull_pdu();
+            self.pull_and_process_pdu();
 
             if let Ok(pdu) = self.events.remove() {
                 let event: Event = pdu.parse()?;
@@ -273,7 +273,7 @@ impl<T: Read + Write> Client<T> {
 
     fn wait_for_api_response(&mut self) -> Result<Pdu, PduError> {
         loop {
-            self.pull_pdu();
+            self.pull_and_process_pdu();
 
             if let Ok(pdu) = self.api_response.remove() {
                 return Ok(pdu)
@@ -283,7 +283,7 @@ impl<T: Read + Write> Client<T> {
 
     fn wait_for_command_reply(&mut self) -> Result<Pdu, PduError> {
         loop {
-            self.pull_pdu();
+            self.pull_and_process_pdu();
 
             if let Ok(pdu) = self.command_reply.remove() {
                 return Ok(pdu)
@@ -297,7 +297,7 @@ impl<T: Read + Write> Client<T> {
         Ok(())
     }
 
-    fn pull_pdu(&mut self) {
+    fn pull_and_process_pdu(&mut self) {
         let pdu = Pdu::build(self.connection.reader()).expect("fails to read pdu");
         let content_type = match pdu.header.get("Content-Type") {
             Some(v) => v,
