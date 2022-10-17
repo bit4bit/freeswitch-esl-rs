@@ -14,7 +14,8 @@ fn main() -> std::io::Result<()> {
     let event = &args[2];
     let mut stream = TcpStream::connect(host)?;
 
-    let mut client = Client::new(stream);
+    let conn = Connection::new(stream);
+    let mut client = Client::new(conn);
     let mut stats = Stats{events_per_sec: 0};
 
     client.auth("cloudpbx").expect("fails to authenticate");
