@@ -422,4 +422,41 @@ API-Command-Argument: calls%20as%20json
 
         Ok(())
     }
+
+    #[test]
+    fn it_pull_event_with_urldecoded_values() -> Result<(), PduError> {
+        use std::io::Cursor;
+        let mut protocol = Cursor::new(vec![0; 512]);
+        protocol.write_fmt(format_args!("
+Content-Length: 526
+Content-Type: text/event-plain
+
+Event-Name: API
+Core-UUID: 2379c0b2-d1a9-465b-bdc6-ca55275e591b
+FreeSWITCH-Hostname: dafa872b4e1a
+FreeSWITCH-Switchname: 16.20.0.9
+FreeSWITCH-IPv4: 16.20.0.9
+FreeSWITCH-IPv6: %3A%3A1
+Event-Date-Local: 2022-10-15%2015%3A32%3A56
+Event-Date-GMT: Sat,%2015%20Oct%202022%2015%3A32%3A56%20GMT
+Event-Date-Timestamp: 1665847976799920
+Event-Calling-File: switch_loadable_module.c
+Event-Calling-Function: switch_api_execute
+Event-Calling-Line-Number: 2949
+Event-Sequence: 5578
+API-Command: show
+API-Command-Argument: calls%20as%20json
+
+")).unwrap();
+        protocol.set_position(0);
+
+        let conn = Connection::new(&mut protocol);
+        let mut client = Client::new(conn);
+
+        let event: Event = client.pull_event()?;
+
+        assert_eq!("calls as json", event.get("API-Command-Argument").unwrap());
+
+        Ok(())
+    }
 }
