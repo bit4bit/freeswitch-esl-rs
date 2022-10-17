@@ -2,7 +2,7 @@ extern crate queues;
 extern crate urldecode;
 
 use std::{io, str, error, fmt};
-use std::io::{Read, Write, BufReader};
+use std::io::{Read, Write, BufReader, BufRead};
 use queues::{CircularBuffer, Queue, IsQueue};
 use std::collections::HashMap;
 
@@ -159,26 +159,7 @@ impl Pdu {
     }
 }
 
-pub struct Connection<C: Read + Write> {
-    reader: BufReader<C>
-}
-
-impl<C: Read + Write> Connection<C> {
-    pub fn new(inner: C) -> Connection<C> {
-        let reader = BufReader::new(inner);
-        
-        Self {
-            reader
-        }
-    }
-
-    pub fn reader(&mut self) -> &mut BufReader<impl Read> {
-        &mut self.reader
-    }
-
-    pub fn writer(&mut self) -> &mut impl Write  {
-        self.reader.get_mut()
-    }
+pub trait Connection: Write + Read {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -208,24 +189,25 @@ impl FromPdu for Event {
 }
 
 // Implement protocol Freeswitch mod_event_socket
-pub struct Client<T: Write + Read> {
-    connection: Connection<T>,
+pub struct Client<C: Connection> {
+    connection: BufReader<C>,
     api_response: Queue<Pdu>,
     command_reply: Queue<Pdu>,
     events: CircularBuffer<Pdu>
 }
 
-impl<T: Read + Write> Client<T> {
-    pub fn new(connection: Connection<T>) -> Self {
+impl<C: Connection> Client<C> {
+    pub fn new(connection: C) -> Self {
+        let reader = BufReader::new(connection);
+
         Self{
-            connection,
+            connection: reader,
             api_response: Queue::new(),
             command_reply: Queue::new(),
             events: CircularBuffer::new(EVENT_QUEUE_SIZE)
         }
     }
 
-   
     pub fn pull_event(&mut self) -> Result<Event, PduError> {
         loop {
             self.pull_and_process_pdu();
@@ -254,7 +236,7 @@ impl<T: Read + Write> Client<T> {
     }
 
     pub fn auth(&mut self, pass: &str) -> Result<(), &'static str> {
-        let pdu = Pdu::build(self.connection.reader()).unwrap();
+        let pdu = Pdu::build(&mut self.connection).unwrap();
         
         if pdu.header["Content-Type"] == "auth/request" {
             self.send_command(format_args!("auth {}", pass)).unwrap();
@@ -292,13 +274,13 @@ impl<T: Read + Write> Client<T> {
     }
 
     fn send_command(&mut self, cmd: std::fmt::Arguments) -> io::Result<()> {
-        write!(self.connection.writer(), "{}\n\n", cmd)?;
-        self.connection.writer().flush()?;
+        write!(self.connection.get_mut(), "{}\n\n", cmd)?;
+        self.connection.get_mut().flush()?;
         Ok(())
     }
 
     fn pull_and_process_pdu(&mut self) {
-        let pdu = Pdu::build(self.connection.reader()).expect("fails to read pdu");
+        let pdu = Pdu::build(&mut self.connection).expect("fails to read pdu");
         let content_type = match pdu.header.get("Content-Type") {
             Some(v) => v,
             None => ""
@@ -319,10 +301,16 @@ impl<T: Read + Write> Client<T> {
     }
 }
 
+impl Connection for std::net::TcpStream {
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    impl Connection for std::io::Cursor<Vec<u8>> {
+    }
+    
     #[test]
     fn it_authenticate() -> Result<(), &'static str> {
         use std::io::Cursor;
@@ -331,8 +319,7 @@ mod tests {
         write!(protocol, "Content-Type: command/reply\nReply-Text: +OK accepted\n\n").unwrap();
         protocol.set_position(0);
 
-        let conn = Connection::new(&mut protocol);
-        let mut client = Client::new(conn);
+        let mut client = Client::new(protocol);
 
         client.auth("test")?;
         Ok(())
@@ -346,8 +333,7 @@ mod tests {
         write!(protocol, "Content-Type: command/reply\nReply-Text: -ERR invalid\n\n").unwrap();
         protocol.set_position(0);
 
-        let conn = Connection::new(&mut protocol);
-        let mut client = Client::new(conn);
+        let mut client = Client::new(protocol);
 
         assert_eq!("fails to authenticate", client.auth("test").unwrap_err());
     }
@@ -365,8 +351,7 @@ mod tests {
                )
         ).unwrap();
         protocol.set_position(0);
-        let conn = Connection::new(&mut protocol);
-        let mut client = Client::new(conn);
+        let mut client = Client::new(protocol);
 
         let pdu = client.api("uptime", "")?;
 
@@ -403,8 +388,7 @@ API-Command-Argument: calls%20as%20json
 ").unwrap();
         protocol.set_position(0);
 
-        let conn = Connection::new(&mut protocol);
-        let mut client = Client::new(conn);
+        let mut client = Client::new(protocol);
 
         let event: Event = client.pull_event()?;
 
@@ -441,8 +425,7 @@ API-Command-Argument: calls%20as%20json
 ").unwrap();
         protocol.set_position(0);
 
-        let conn = Connection::new(&mut protocol);
-        let mut client = Client::new(conn);
+        let mut client = Client::new(protocol);
 
         let event: Event = client.pull_event()?;
 
