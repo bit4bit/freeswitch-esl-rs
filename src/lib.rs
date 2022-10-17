@@ -172,11 +172,11 @@ impl<C: Read + Write> Connection<C> {
         }
     }
 
-    pub fn reader(&mut self) -> &mut BufReader<C> {
+    pub fn reader(&mut self) -> &mut BufReader<impl Read> {
         &mut self.reader
     }
 
-    pub fn get_mut(&mut self) -> &mut C  {
+    pub fn writer(&mut self) -> &mut impl Write  {
         self.reader.get_mut()
     }
 }
@@ -292,8 +292,8 @@ impl<T: Read + Write> Client<T> {
     }
 
     fn send_command(&mut self, cmd: std::fmt::Arguments) -> io::Result<()> {
-        write!(self.connection.get_mut(), "{}\n\n", cmd)?;
-        self.connection.get_mut().flush()?;
+        write!(self.connection.writer(), "{}\n\n", cmd)?;
+        self.connection.writer().flush()?;
         Ok(())
     }
 
