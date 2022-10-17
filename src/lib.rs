@@ -190,8 +190,12 @@ impl Event {
     pub fn fetch(&self, k: &str) -> Option<&String> {
         self.header.get(k)
     }
+}
 
-    fn from_pdu(pdu: &Pdu) -> Result<Self, PduError> {
+impl FromPdu for Event {
+    type Err = PduError;
+
+    fn from_pdu(pdu: &Pdu) -> Result<Self, Self::Err> {
         if pdu.get("Content-Type") == "text/event-plain" {
             let content = String::from(str::from_utf8(&pdu.content)?);
             let header = header_parse(content);
@@ -228,7 +232,7 @@ impl<T: Read + Write> Client<T> {
 
             match self.events.remove() {
                 Ok(pdu) => {
-                    let event: Event = Event::from_pdu(&pdu)?;
+                    let event: Event = pdu.parse()?;
                     return Ok(event);
                 },
                 _ => {}
