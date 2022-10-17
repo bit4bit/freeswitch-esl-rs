@@ -292,7 +292,7 @@ impl<T: Read + Write> Client<T> {
     }
 
     fn send_command(&mut self, cmd: std::fmt::Arguments) -> io::Result<()> {
-        self.connection.get_mut().write_fmt(format_args!("{}\n\n", cmd))?;
+        write!(self.connection.get_mut(), "{}\n\n", cmd)?;
         self.connection.get_mut().flush()?;
         Ok(())
     }
@@ -327,8 +327,8 @@ mod tests {
     fn it_authenticate() -> Result<(), &'static str> {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
-        protocol.write_fmt(format_args!("Content-Type: auth/request\n\n")).unwrap();
-        protocol.write_fmt(format_args!("Content-Type: command/reply\nReply-Text: +OK accepted\n\n")).unwrap();
+        write!(protocol, "Content-Type: auth/request\n\n").unwrap();
+        write!(protocol, "Content-Type: command/reply\nReply-Text: +OK accepted\n\n").unwrap();
         protocol.set_position(0);
 
         let conn = Connection::new(&mut protocol);
@@ -342,8 +342,8 @@ mod tests {
     fn it_invalid_authentication() {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
-        protocol.write_fmt(format_args!("Content-Type: auth/request\n\n")).unwrap();
-        protocol.write_fmt(format_args!("Content-Type: command/reply\nReply-Text: -ERR invalid\n\n")).unwrap();
+        write!(protocol, "Content-Type: auth/request\n\n").unwrap();
+        write!(protocol, "Content-Type: command/reply\nReply-Text: -ERR invalid\n\n").unwrap();
         protocol.set_position(0);
 
         let conn = Connection::new(&mut protocol);
@@ -356,14 +356,14 @@ mod tests {
     fn it_call_api() -> Result<(), PduError> {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
-        protocol.write_fmt(format_args!("api uptime \n\n")).unwrap();
-        protocol.write_fmt(format_args!(
-            concat!(
-                "Content-Type: api/response\n",
-                "Content-Length: 6\n\n",
-                "999666"
-            )
-        )).unwrap();
+        write!(protocol, "api uptime \n\n").unwrap();
+        write!(protocol,
+               concat!(
+                   "Content-Type: api/response\n",
+                   "Content-Length: 6\n\n",
+                   "999666"
+               )
+        ).unwrap();
         protocol.set_position(0);
         let conn = Connection::new(&mut protocol);
         let mut client = Client::new(conn);
@@ -380,7 +380,7 @@ mod tests {
     fn it_pull_event() -> Result<(), PduError> {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
-        protocol.write_fmt(format_args!("
+        write!(protocol, "
 Content-Length: 526
 Content-Type: text/event-plain
 
@@ -400,7 +400,7 @@ Event-Sequence: 5578
 API-Command: show
 API-Command-Argument: calls%20as%20json
 
-")).unwrap();
+").unwrap();
         protocol.set_position(0);
 
         let conn = Connection::new(&mut protocol);
@@ -418,7 +418,7 @@ API-Command-Argument: calls%20as%20json
     fn it_pull_event_with_urldecoded_values() -> Result<(), PduError> {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
-        protocol.write_fmt(format_args!("
+        write!(protocol, "
 Content-Length: 526
 Content-Type: text/event-plain
 
@@ -438,7 +438,7 @@ Event-Sequence: 5578
 API-Command: show
 API-Command-Argument: calls%20as%20json
 
-")).unwrap();
+").unwrap();
         protocol.set_position(0);
 
         let conn = Connection::new(&mut protocol);
