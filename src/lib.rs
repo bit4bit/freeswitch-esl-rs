@@ -1,163 +1,14 @@
 extern crate queues;
-extern crate urldecode;
+mod data;
 
-use std::{io, str, error, fmt};
+use std::{io};
 use std::io::{Read, Write, BufReader};
 use queues::{CircularBuffer, Queue, IsQueue};
-use std::collections::HashMap;
+use crate::data::*;
+
+pub use crate::data::{Event, Pdu, PduError};
 
 const EVENT_QUEUE_SIZE: usize = 100_000;
-
-// Pdu (Packet data unit) from Freeswitch mod_event_socket.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Pdu {
-    header: HashMap<String, String>,
-    // TODO: no pub
-    pub content: Vec<u8>
-}
-
-#[derive(Debug)]
-pub enum PduError {
-    IOError(io::Error),
-    StrError(str::Utf8Error)
-}
-
-impl fmt::Display for PduError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PduError::IOError(e) => write!(f, "{}", e),
-            PduError::StrError(e) => write!(f, "{}", e)
-        }
-    }
-}
-
-impl error::Error for PduError {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        match self {
-            PduError::IOError(e) => Some(e),
-            PduError::StrError(e) => Some(e)
-        }
-    }
-}
-
-impl From<io::Error> for PduError {
-    fn from(e: io::Error) -> Self {
-        PduError::IOError(e)
-    }
-}
-
-impl From<str::Utf8Error> for PduError {
-    fn from(e: str::Utf8Error) -> Self {
-        PduError::StrError(e)
-    }
-}
-
-// casting to another type
-pub trait FromPdu: Sized {
-    type Err;
-
-    fn from_pdu(pdu: &Pdu) -> Result<Self, Self::Err>;
-}
-
-// Get Pdu content as String
-impl FromPdu for String {
-    type Err = PduError;
-    
-    fn from_pdu(pdu: &Pdu) -> Result<Self, Self::Err> {
-        let content: String = str::from_utf8(&pdu.content)?.to_string();
-        Ok(content)
-    }
-}
-
-type Header = HashMap<String, String>;
-
-fn header_parse(content: String) -> Header {
-    let mut header = Header::new();
-
-    content
-        .split('\n')
-        .filter(|line| {
-            !line.is_empty()
-        })
-        .for_each(|line| {
-            let mut item = line.splitn(2, ':');
-            let key = item.next().unwrap().trim().to_string();
-            let value = item.next().unwrap().trim().to_string();
-
-            header.insert(key, urldecode::decode(value));
-        });
-
-    header
-}
-
-impl Pdu {
-    // Parse Pdu to another type.
-    fn parse<F: FromPdu>(&self) -> Result<F, F::Err> {
-        FromPdu::from_pdu(self)
-    }
-
-    fn get(&self, k: &str) -> String {
-        match self.header.get(k) {
-            Some(v) => v.to_string(),
-            None => "".to_string()
-        }
-    }
-
-    fn build(reader: &mut impl io::BufRead) -> Result<Pdu, PduError> {
-        let mut pdu = Pdu {
-            header: HashMap::new(),
-            content: Vec::new()
-        };
-
-        pdu.do_parse(reader)?;
-        
-        Ok(pdu)
-    }
-
-    fn do_parse(&mut self, reader: &mut impl io::BufRead) -> io::Result<()> {
-        self.parse_header(reader)?;
-        self.parse_content(reader)?;
-
-        Ok(())
-    }
-
-    fn get_header_content(&self, reader: &mut impl io::BufRead) -> io::Result<Vec<u8>> {
-        let mut raw: Vec<u8> = Vec::new();
-        let mut buf: Vec<u8> = Vec::new();
-
-        loop {
-            buf.clear();
-            let readed_bytes = reader.read_until(b'\n', &mut buf)?;
-            if readed_bytes == 1 && buf[0] == b'\n' {
-                break;
-            } else {
-                raw.append(&mut buf);
-            }
-        }
-
-        Ok(raw)
-    }
-
-    fn parse_header(&mut self, reader: &mut impl io::BufRead) -> io::Result<()> {
-        let raw = self.get_header_content(reader)?;
-        let raw_str = String::from_utf8(raw).unwrap();
-        self.header = header_parse(raw_str);
-
-        Ok(())
-    }
-
-    fn parse_content(&mut self, reader: &mut impl io::BufRead) -> io::Result<()> {
-        if let Some(length) = self.header.get("Content-Length") {
-            let length: usize = length.parse().unwrap();
-            let mut content = vec![0u8; length];
-            reader.read_exact(&mut content)?;
-
-            self.content.append(&mut content);
-        }
-
-        Ok(())
-    }
-}
 
 pub trait Connectioner: Write + Read {
 }
@@ -182,32 +33,6 @@ impl<C: Connectioner> Connection<C> {
     fn writer(&mut self) -> &mut impl Write {
         self.reader.get_mut()
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Event {
-    inner: Header
-}
-
-impl Event {
-    pub fn get(&self, k: &str) -> Option<&String> {
-        self.inner.get(k)
-    }
-}
-
-impl FromPdu for Event {
-    type Err = PduError;
-
-    fn from_pdu(pdu: &Pdu) -> Result<Self, Self::Err> {
-        if pdu.get("Content-Type") == "text/event-plain" {
-            let content = String::from(str::from_utf8(&pdu.content)?);
-            let header = header_parse(content);
-            Ok(Event{inner: header})
-        } else {
-            panic!("invalid content-type expected text/event-plain,");
-        }
-    }
-
 }
 
 // Implement protocol Freeswitch mod_event_socket
@@ -258,12 +83,12 @@ impl<C: Connectioner> Client<C> {
     pub fn auth(&mut self, pass: &str) -> Result<(), &'static str> {
         let pdu = Pdu::build(self.connection.reader()).unwrap();
         
-        if pdu.header["Content-Type"] == "auth/request" {
+        if pdu.header("Content-Type") == "auth/request" {
             self.send_command(format_args!("auth {}", pass)).unwrap();
 
             let pdu = self.wait_for_command_reply().unwrap();
 
-            if pdu.header["Reply-Text"] == "+OK accepted" {
+            if pdu.header("Reply-Text") == "+OK accepted" {
                 Ok(())
             } else {
                 Err("fails to authenticate")
@@ -301,10 +126,7 @@ impl<C: Connectioner> Client<C> {
 
     fn pull_and_process_pdu(&mut self) {
         let pdu = Pdu::build(self.connection.reader()).expect("fails to read pdu");
-        let content_type = match pdu.header.get("Content-Type") {
-            Some(v) => v,
-            None => ""
-        };
+        let content_type = pdu.header("Content-Type");
 
         if content_type == "api/response" {
             self.api_response.add(pdu)

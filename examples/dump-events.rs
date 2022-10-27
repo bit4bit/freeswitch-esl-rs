@@ -1,4 +1,3 @@
-extern crate freeswitch_esl_rs;
 use std::net::{TcpStream};
 use std::env;
 use freeswitch_esl_rs::{Connection,Client,Event};
