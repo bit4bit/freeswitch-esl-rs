@@ -2,6 +2,7 @@ extern crate urldecode;
 
 use std::{io, str, error, fmt, string, num};
 use std::collections::HashMap;
+use std::io::{Read, BufReader};
 
 // Pdu (Packet data unit) from Freeswitch mod_event_socket.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,27 +101,11 @@ fn header_parse(content: String) -> Header {
 }
 
 impl Pdu {
-    pub fn header(&self, k: &str) -> String {
+   pub fn header(&self, k: &str) -> String {
         match self.inner_header.get(k) {
             Some(v) => v.to_string(),
             None => "".to_string()
         }
-    }
-    
-    pub fn build(reader: &mut impl io::BufRead) -> Result<Pdu, PduError> {
-        let mut pdu = Pdu {
-            inner_header: HashMap::new(),
-            content: Vec::new()
-        };
-
-        pdu.do_parse(reader)?;
-        
-        Ok(pdu)
-    }
-
-    // Parse Pdu to another type.
-    pub fn parse<F: FromPdu>(&self) -> Result<F, F::Err> {
-        FromPdu::from_pdu(self)
     }
 
     fn get(&self, k: &str) -> String {
@@ -130,14 +115,50 @@ impl Pdu {
         }
     }
 
-    fn do_parse(&mut self, reader: &mut impl io::BufRead) -> Result<(), PduError> {
-        self.parse_header(reader)?;
-        self.parse_content(reader)?;
+    // Parse Pdu to another type.
+    pub fn parse<F: FromPdu>(&self) -> Result<F, F::Err> {
+        FromPdu::from_pdu(self)
+    }
+}
 
-        Ok(())
+pub struct PduParser {
+}
+
+impl PduParser {
+    pub fn parse<R: Read>(reader: &mut BufReader<R>) -> Result<Pdu, PduError> {
+        let header = Self::parse_header(reader)?;
+        let content = Self::parse_content(&header, reader)?;
+
+        let pdu = Pdu {
+            inner_header: header,
+            content: content
+        };
+
+        Ok(pdu)
     }
 
-    fn get_header_content(&self, reader: &mut impl io::BufRead) -> io::Result<Vec<u8>> {
+    fn parse_header(reader: &mut impl io::BufRead) -> Result<Header, PduError> {
+        let raw = Self::get_header_content(reader)?;
+        let raw_str = String::from_utf8(raw)?;
+        let header = header_parse(raw_str);
+
+        Ok(header)
+    }
+
+    fn parse_content(header: &Header, reader: &mut impl io::BufRead) -> Result<Vec<u8>, PduError> {
+        if let Some(length) = header.get("Content-Length") {
+            let length: usize = length.parse()?;
+
+            let mut content = vec![0u8; length];
+            reader.read_exact(&mut content)?;
+
+            return Ok(content)
+        }
+
+        Ok(vec![0u8; 0])
+    }
+
+    fn get_header_content(reader: &mut impl io::BufRead) -> io::Result<Vec<u8>> {
         let mut raw: Vec<u8> = Vec::new();
         let mut buf: Vec<u8> = Vec::new();
 
@@ -152,26 +173,6 @@ impl Pdu {
         }
 
         Ok(raw)
-    }
-
-    fn parse_header(&mut self, reader: &mut impl io::BufRead) -> Result<(), PduError> {
-        let raw = self.get_header_content(reader)?;
-        let raw_str = String::from_utf8(raw)?;
-        self.inner_header = header_parse(raw_str);
-
-        Ok(())
-    }
-
-    fn parse_content(&mut self, reader: &mut impl io::BufRead) -> Result<(), PduError> {
-        if let Some(length) = self.inner_header.get("Content-Length") {
-            let length: usize = length.parse()?;
-            let mut content = vec![0u8; length];
-            reader.read_exact(&mut content)?;
-
-            self.content.append(&mut content);
-        }
-
-        Ok(())
     }
 }
 
