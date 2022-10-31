@@ -13,51 +13,51 @@ pub struct Pdu {
 }
 
 #[derive(Debug)]
-pub enum PduError {
+pub enum ParseError {
     IOError(io::Error),
     StrError(str::Utf8Error),
     StringError(string::FromUtf8Error),
     NumError(num::ParseIntError)
 }
 
-impl fmt::Display for PduError {
+impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
     }
 }
 
-impl error::Error for PduError {
+impl error::Error for ParseError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
-            PduError::IOError(e) => Some(e),
-            PduError::StrError(e) => Some(e),
-            PduError::StringError(e) => Some(e),
-            PduError::NumError(e) => Some(e)
+            ParseError::IOError(e) => Some(e),
+            ParseError::StrError(e) => Some(e),
+            ParseError::StringError(e) => Some(e),
+            ParseError::NumError(e) => Some(e)
         }
     }
 }
 
-impl From<io::Error> for PduError {
+impl From<io::Error> for ParseError {
     fn from(e: io::Error) -> Self {
-        PduError::IOError(e)
+        ParseError::IOError(e)
     }
 }
 
-impl From<str::Utf8Error> for PduError {
+impl From<str::Utf8Error> for ParseError {
     fn from(e: str::Utf8Error) -> Self {
-        PduError::StrError(e)
+        ParseError::StrError(e)
     }
 }
 
-impl From<string::FromUtf8Error> for PduError {
+impl From<string::FromUtf8Error> for ParseError {
     fn from(e: string::FromUtf8Error) -> Self {
-        PduError::StringError(e)
+        ParseError::StringError(e)
     }
 }
 
-impl From<num::ParseIntError> for PduError {
+impl From<num::ParseIntError> for ParseError {
     fn from(e: num::ParseIntError) -> Self {
-        PduError::NumError(e)
+        ParseError::NumError(e)
     }
 }
 
@@ -70,7 +70,7 @@ pub trait FromPdu: Sized {
 
 // Get Pdu content as String
 impl FromPdu for String {
-    type Err = PduError;
+    type Err = ParseError;
     
     fn from_pdu(pdu: &Pdu) -> Result<Self, Self::Err> {
         let content: String = str::from_utf8(&pdu.content)?.to_string();
@@ -125,7 +125,7 @@ pub struct PduParser {
 }
 
 impl PduParser {
-    pub fn parse<R: Read>(reader: &mut BufReader<R>) -> Result<Pdu, PduError> {
+    pub fn parse<R: Read>(reader: &mut BufReader<R>) -> Result<Pdu, ParseError> {
         let header = Self::parse_header(reader)?;
         let content = Self::parse_content(&header, reader)?;
 
@@ -137,7 +137,7 @@ impl PduParser {
         Ok(pdu)
     }
 
-    fn parse_header(reader: &mut impl io::BufRead) -> Result<Header, PduError> {
+    fn parse_header(reader: &mut impl io::BufRead) -> Result<Header, ParseError> {
         let raw = Self::get_header_content(reader)?;
         let raw_str = String::from_utf8(raw)?;
         let header = header_parse(raw_str);
@@ -145,7 +145,7 @@ impl PduParser {
         Ok(header)
     }
 
-    fn parse_content(header: &Header, reader: &mut impl io::BufRead) -> Result<Vec<u8>, PduError> {
+    fn parse_content(header: &Header, reader: &mut impl io::BufRead) -> Result<Vec<u8>, ParseError> {
         if let Some(length) = header.get("Content-Length") {
             let length: usize = length.parse()?;
 
@@ -188,7 +188,7 @@ impl Event {
 }
 
 impl FromPdu for Event {
-    type Err = PduError;
+    type Err = ParseError;
 
     fn from_pdu(pdu: &Pdu) -> Result<Self, Self::Err> {
         if pdu.get("Content-Type") == "text/event-plain" {
@@ -196,7 +196,7 @@ impl FromPdu for Event {
             let header = header_parse(content);
             Ok(Event{inner: header})
         } else {
-            panic!("invalid content-type expected text/event-plain,");
+            panic!("invalid content-type expected text/event-plain")
         }
     }
 }
