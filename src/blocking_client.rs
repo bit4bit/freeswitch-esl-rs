@@ -50,7 +50,7 @@ impl<C: Connectioner> Client<C> {
         }
     }
 
-    pub fn pull_event(&mut self) -> Result<Event, PduError> {
+    pub fn pull_event(&mut self) -> Result<Event, ParseError> {
         loop {
             self.pull_and_process_pdu();
 
@@ -61,7 +61,7 @@ impl<C: Connectioner> Client<C> {
         }
     }
 
-    pub fn event(&mut self, event: &str) -> Result<(), PduError> {
+    pub fn event(&mut self, event: &str) -> Result<(), ParseError> {
         self.send_command(format_args!("event plain {}", event))?;
 
         self.wait_for_command_reply()?;
@@ -69,7 +69,7 @@ impl<C: Connectioner> Client<C> {
         Ok(())
     }
     
-    pub fn api(&mut self, cmd: &str, arg: &str) -> Result<Pdu, PduError> {
+    pub fn api(&mut self, cmd: &str, arg: &str) -> Result<Pdu, ParseError> {
         self.send_command(format_args!("api {} {}", cmd, arg))?;
 
         let pdu = self.wait_for_api_response()?;
@@ -95,7 +95,7 @@ impl<C: Connectioner> Client<C> {
         }
     }
 
-    fn wait_for_api_response(&mut self) -> Result<Pdu, PduError> {
+    fn wait_for_api_response(&mut self) -> Result<Pdu, ParseError> {
         loop {
             self.pull_and_process_pdu();
 
@@ -105,7 +105,7 @@ impl<C: Connectioner> Client<C> {
         }
     }
 
-    fn wait_for_command_reply(&mut self) -> Result<Pdu, PduError> {
+    fn wait_for_command_reply(&mut self) -> Result<Pdu, ParseError> {
         loop {
             self.pull_and_process_pdu();
 
@@ -177,7 +177,7 @@ mod tests {
     }
 
     #[test]
-    fn it_call_api() -> Result<(), PduError> {
+    fn it_call_api() -> Result<(), ParseError> {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
         write!(protocol, "api uptime \n\n").unwrap();
@@ -201,7 +201,7 @@ mod tests {
     }
 
     #[test]
-    fn it_pull_event() -> Result<(), PduError> {
+    fn it_pull_event() -> Result<(), ParseError> {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
         write!(protocol, "
@@ -239,7 +239,7 @@ API-Command-Argument: calls%20as%20json
     }
 
     #[test]
-    fn it_pull_event_with_urldecoded_values() -> Result<(), PduError> {
+    fn it_pull_event_with_urldecoded_values() -> Result<(), ParseError> {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
         write!(protocol, "
