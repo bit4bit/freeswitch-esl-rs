@@ -17,7 +17,8 @@ pub enum ParseError {
     IOError(io::Error),
     StrError(str::Utf8Error),
     StringError(string::FromUtf8Error),
-    NumError(num::ParseIntError)
+    NumError(num::ParseIntError),
+    FromPduError(FromPduError)
 }
 
 impl fmt::Display for ParseError {
@@ -32,7 +33,8 @@ impl error::Error for ParseError {
             ParseError::IOError(e) => Some(e),
             ParseError::StrError(e) => Some(e),
             ParseError::StringError(e) => Some(e),
-            ParseError::NumError(e) => Some(e)
+            ParseError::NumError(e) => Some(e),
+            ParseError::FromPduError(e) => Some(e)
         }
     }
 }
@@ -58,6 +60,21 @@ impl From<string::FromUtf8Error> for ParseError {
 impl From<num::ParseIntError> for ParseError {
     fn from(e: num::ParseIntError) -> Self {
         ParseError::NumError(e)
+    }
+}
+
+#[derive(Debug)]
+pub struct FromPduError(&'static str);
+
+impl fmt::Display for FromPduError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
+
+impl error::Error for FromPduError {
+    fn description(&self) -> &str {
+        &self.0
     }
 }
 
@@ -178,12 +195,19 @@ impl PduParser {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
-    inner: Header
+    inner: Header,
+    length: usize
 }
 
 impl Event {
+    // Return value of [`k`]
     pub fn get(&self, k: &str) -> Option<&String> {
         self.inner.get(k)
+    }
+
+    // Returns the length of the event.
+    pub fn len(&self) -> usize {
+        self.length
     }
 }
 
@@ -192,11 +216,13 @@ impl FromPdu for Event {
 
     fn from_pdu(pdu: &Pdu) -> Result<Self, Self::Err> {
         if pdu.get("Content-Type") == "text/event-plain" {
-            let content = String::from(str::from_utf8(&pdu.content)?);
+            let raw = str::from_utf8(&pdu.content)?;
+            let length = raw.len();
+            let content = String::from(raw);
             let header = header_parse(content);
-            Ok(Event{inner: header})
+            Ok(Event{inner: header, length: length})
         } else {
-            panic!("invalid content-type expected text/event-plain")
+            Err(ParseError::FromPduError(FromPduError("invalid content-type expected text/event-plain")))
         }
     }
 }
