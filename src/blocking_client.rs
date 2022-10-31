@@ -78,7 +78,7 @@ impl<C: Connectioner> Client<C> {
     }
 
     pub fn auth(&mut self, pass: &str) -> Result<(), &'static str> {
-        let pdu = Pdu::build(self.connection.reader()).unwrap();
+        let pdu = PduParser::parse(self.connection.reader()).unwrap();
         
         if pdu.header("Content-Type") == "auth/request" {
             self.send_command(format_args!("auth {}", pass)).unwrap();
@@ -122,7 +122,7 @@ impl<C: Connectioner> Client<C> {
     }
 
     fn pull_and_process_pdu(&mut self) {
-        let pdu = Pdu::build(self.connection.reader()).expect("fails to read pdu");
+        let pdu = PduParser::parse(self.connection.reader()).expect("fails to read pdu");
         let content_type = pdu.header("Content-Type");
 
         if content_type == "api/response" {
