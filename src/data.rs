@@ -1,6 +1,6 @@
 extern crate urldecode;
 
-use std::{io, str, error, fmt};
+use std::{io, str, error, fmt, string, num};
 use std::collections::HashMap;
 
 // Pdu (Packet data unit) from Freeswitch mod_event_socket.
@@ -14,15 +14,14 @@ pub struct Pdu {
 #[derive(Debug)]
 pub enum PduError {
     IOError(io::Error),
-    StrError(str::Utf8Error)
+    StrError(str::Utf8Error),
+    StringError(string::FromUtf8Error),
+    NumError(num::ParseIntError)
 }
 
 impl fmt::Display for PduError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            PduError::IOError(e) => write!(f, "{}", e),
-            PduError::StrError(e) => write!(f, "{}", e)
-        }
+        write!(f, "{:?}", self)
     }
 }
 
@@ -30,7 +29,9 @@ impl error::Error for PduError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
             PduError::IOError(e) => Some(e),
-            PduError::StrError(e) => Some(e)
+            PduError::StrError(e) => Some(e),
+            PduError::StringError(e) => Some(e),
+            PduError::NumError(e) => Some(e)
         }
     }
 }
@@ -44,6 +45,18 @@ impl From<io::Error> for PduError {
 impl From<str::Utf8Error> for PduError {
     fn from(e: str::Utf8Error) -> Self {
         PduError::StrError(e)
+    }
+}
+
+impl From<string::FromUtf8Error> for PduError {
+    fn from(e: string::FromUtf8Error) -> Self {
+        PduError::StringError(e)
+    }
+}
+
+impl From<num::ParseIntError> for PduError {
+    fn from(e: num::ParseIntError) -> Self {
+        PduError::NumError(e)
     }
 }
 
@@ -76,6 +89,7 @@ fn header_parse(content: String) -> Header {
         })
         .for_each(|line| {
             let mut item = line.splitn(2, ':');
+            // TODO una libreria deberia hacer esto? pues no ome
             let key = item.next().unwrap().trim().to_string();
             let value = item.next().unwrap().trim().to_string();
 
@@ -116,7 +130,7 @@ impl Pdu {
         }
     }
 
-    fn do_parse(&mut self, reader: &mut impl io::BufRead) -> io::Result<()> {
+    fn do_parse(&mut self, reader: &mut impl io::BufRead) -> Result<(), PduError> {
         self.parse_header(reader)?;
         self.parse_content(reader)?;
 
@@ -140,17 +154,17 @@ impl Pdu {
         Ok(raw)
     }
 
-    fn parse_header(&mut self, reader: &mut impl io::BufRead) -> io::Result<()> {
+    fn parse_header(&mut self, reader: &mut impl io::BufRead) -> Result<(), PduError> {
         let raw = self.get_header_content(reader)?;
-        let raw_str = String::from_utf8(raw).unwrap();
+        let raw_str = String::from_utf8(raw)?;
         self.inner_header = header_parse(raw_str);
 
         Ok(())
     }
 
-    fn parse_content(&mut self, reader: &mut impl io::BufRead) -> io::Result<()> {
+    fn parse_content(&mut self, reader: &mut impl io::BufRead) -> Result<(), PduError> {
         if let Some(length) = self.inner_header.get("Content-Length") {
-            let length: usize = length.parse().unwrap();
+            let length: usize = length.parse()?;
             let mut content = vec![0u8; length];
             reader.read_exact(&mut content)?;
 
