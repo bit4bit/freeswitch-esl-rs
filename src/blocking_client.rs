@@ -1,6 +1,6 @@
 extern crate queues;
 
-use std::{io};
+use std::{io, fmt, error};
 use std::io::{Read, Write, BufReader};
 use queues::{CircularBuffer, Queue, IsQueue};
 use crate::data::*;
@@ -32,6 +32,39 @@ impl<C: Connectioner> Connection<C> {
     }
 }
 
+#[derive(Debug)]
+pub enum ClientError {
+    IOError(io::Error),
+    ParseError(ParseError)
+}
+
+impl fmt::Display for ClientError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl error::Error for ClientError {
+    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+        match self {
+            ClientError::ParseError(e) => Some(e),
+            ClientError::IOError(e) => Some(e)
+        }
+    }
+}
+
+impl From<ParseError> for ClientError {
+    fn from(e: ParseError) -> Self {
+        ClientError::ParseError(e)
+    }
+}
+
+impl From<io::Error> for ClientError {
+    fn from(e: io::Error) -> Self {
+        ClientError::IOError(e)
+    }
+}
+
 // Implement protocol Freeswitch mod_event_socket
 pub struct Client<C: Connectioner> {
     connection: Connection<C>,
@@ -50,7 +83,7 @@ impl<C: Connectioner> Client<C> {
         }
     }
 
-    pub fn pull_event(&mut self) -> Result<Event, ParseError> {
+    pub fn pull_event(&mut self) -> Result<Event, ClientError> {
         loop {
             self.pull_and_process_pdu();
 
@@ -61,7 +94,7 @@ impl<C: Connectioner> Client<C> {
         }
     }
 
-    pub fn event(&mut self, event: &str) -> Result<(), ParseError> {
+    pub fn event(&mut self, event: &str) -> Result<(), ClientError> {
         self.send_command(format_args!("event plain {}", event))?;
 
         self.wait_for_command_reply()?;
@@ -69,12 +102,12 @@ impl<C: Connectioner> Client<C> {
         Ok(())
     }
     
-    pub fn api(&mut self, cmd: &str, arg: &str) -> Result<Pdu, ParseError> {
+    pub fn api(&mut self, cmd: &str, arg: &str) -> Result<String, ClientError> {
         self.send_command(format_args!("api {} {}", cmd, arg))?;
 
         let pdu = self.wait_for_api_response()?;
-
-        Ok(pdu)
+        let response: String = pdu.parse()?;
+        Ok(response)
     }
 
     pub fn auth(&mut self, pass: &str) -> Result<(), &'static str> {
@@ -177,7 +210,7 @@ mod tests {
     }
 
     #[test]
-    fn it_call_api() -> Result<(), ParseError> {
+    fn it_call_api() -> Result<(), ClientError> {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
         write!(protocol, "api uptime \n\n").unwrap();
@@ -194,14 +227,14 @@ mod tests {
 
         let pdu = client.api("uptime", "")?;
 
-        let response: String = pdu.parse()?;
+        let response: String = pdu.parse().unwrap();
         assert_eq!("999666", response);
 
         Ok(())
     }
 
     #[test]
-    fn it_pull_event() -> Result<(), ParseError> {
+    fn it_pull_event() -> Result<(), ClientError> {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
         write!(protocol, "
@@ -239,7 +272,7 @@ API-Command-Argument: calls%20as%20json
     }
 
     #[test]
-    fn it_pull_event_with_urldecoded_values() -> Result<(), ParseError> {
+    fn it_pull_event_with_urldecoded_values() -> Result<(), ClientError> {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
         write!(protocol, "

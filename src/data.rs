@@ -8,8 +8,7 @@ use std::io::{Read, BufReader};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pdu {
     inner_header: HashMap<String, String>,
-    // TODO: no pub
-    pub content: Vec<u8>
+    content: Vec<u8>
 }
 
 #[derive(Debug)]
