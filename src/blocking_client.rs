@@ -34,6 +34,7 @@ impl<C: Connectioner> Connection<C> {
 
 #[derive(Debug)]
 pub enum ClientError {
+    ConnectionClose,
     IOError(io::Error),
     ParseError(ParseError)
 }
@@ -48,7 +49,8 @@ impl error::Error for ClientError {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
             ClientError::ParseError(e) => Some(e),
-            ClientError::IOError(e) => Some(e)
+            ClientError::IOError(e) => Some(e),
+            ClientError::ConnectionClose => Some(self)
         }
     }
 }
@@ -85,7 +87,7 @@ impl<C: Connectioner> Client<C> {
 
     pub fn pull_event(&mut self) -> Result<Event, ClientError> {
         loop {
-            self.pull_and_process_pdu();
+            self.pull_and_process_pdu()?;
 
             if let Ok(pdu) = self.events.remove() {
                 let event: Event = pdu.parse()?;
@@ -128,9 +130,9 @@ impl<C: Connectioner> Client<C> {
         }
     }
 
-    fn wait_for_api_response(&mut self) -> Result<Pdu, ParseError> {
+    fn wait_for_api_response(&mut self) -> Result<Pdu, ClientError> {
         loop {
-            self.pull_and_process_pdu();
+            self.pull_and_process_pdu()?;
 
             if let Ok(pdu) = self.api_response.remove() {
                 return Ok(pdu)
@@ -138,9 +140,9 @@ impl<C: Connectioner> Client<C> {
         }
     }
 
-    fn wait_for_command_reply(&mut self) -> Result<Pdu, ParseError> {
+    fn wait_for_command_reply(&mut self) -> Result<Pdu, ClientError> {
         loop {
-            self.pull_and_process_pdu();
+            self.pull_and_process_pdu()?;
 
             if let Ok(pdu) = self.command_reply.remove() {
                 return Ok(pdu)
@@ -154,19 +156,27 @@ impl<C: Connectioner> Client<C> {
         Ok(())
     }
 
-    fn pull_and_process_pdu(&mut self) {
+    fn pull_and_process_pdu(&mut self) -> Result<(), ClientError> {
         let pdu = PduParser::parse(self.connection.reader()).expect("fails to read pdu");
         let content_type = pdu.header("Content-Type");
 
         if content_type == "api/response" {
             self.api_response.add(pdu)
                 .expect("fails to add to api response");
+            Ok(())
+        } else if content_type == "text/disconnect-notice" {
+            Err(ClientError::ConnectionClose)
         } else if content_type == "text/event-plain" {
             self.events.add(pdu)
                 .expect("fails to add event");
+
+            Ok(())
         } else if content_type == "command/reply" {
             self.command_reply.add(pdu)
                 .expect("fails to add pdu to command_reply");
+            Ok(())
+        } else {
+            Ok(())
         }
     }
 }
@@ -306,5 +316,24 @@ API-Command-Argument: calls%20as%20json
         assert_eq!("calls as json", event.get("API-Command-Argument").unwrap());
 
         Ok(())
+    }
+
+    #[test]
+    fn it_handle_disconnection_from_server() {
+        use std::io::Cursor;
+        let mut protocol = Cursor::new(vec![0; 512]);
+        write!(protocol, "
+Content-Type: text/disconnect-notice
+Content-Length: 67
+
+Disconnected, goodbye.
+See you at ClueCon! http://www.cluecon.com/").unwrap();
+        protocol.set_position(0);
+
+        let conn = Connection::new(protocol);
+        let mut client = Client::new(conn);
+
+        let event = client.pull_event();
+        assert_eq!(true, event.is_err());
     }
 }
