@@ -175,8 +175,10 @@ impl<C: Connectioner> Client<C> {
             self.command_reply.add(pdu)
                 .expect("fails to add pdu to command_reply");
             Ok(())
+        } else if pdu.is_empty() {
+            Err(ClientError::ConnectionClose)
         } else {
-            Ok(())
+            panic!("missing handler for {:?}", pdu);
         }
     }
 }
@@ -247,8 +249,7 @@ mod tests {
     fn it_pull_event() -> Result<(), ClientError> {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
-        write!(protocol, "
-Content-Length: 526
+        write!(protocol, "Content-Length: 526
 Content-Type: text/event-plain
 
 Event-Name: API
@@ -273,7 +274,7 @@ API-Command-Argument: calls%20as%20json
         let conn = Connection::new(protocol);
         let mut client = Client::new(conn);
 
-        let event: Event = client.pull_event()?;
+        let event: Event = client.pull_event().unwrap();
 
         assert_eq!("API", event.get("Event-Name").unwrap());
         assert_eq!("show", event.get("API-Command").unwrap());
@@ -285,8 +286,7 @@ API-Command-Argument: calls%20as%20json
     fn it_pull_event_with_urldecoded_values() -> Result<(), ClientError> {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
-        write!(protocol, "
-Content-Length: 526
+        write!(protocol, "Content-Length: 526
 Content-Type: text/event-plain
 
 Event-Name: API
@@ -319,15 +319,28 @@ API-Command-Argument: calls%20as%20json
     }
 
     #[test]
-    fn it_handle_disconnection_from_server() {
+    fn it_handle_event_disconnection_from_server() {
         use std::io::Cursor;
         let mut protocol = Cursor::new(vec![0; 512]);
-        write!(protocol, "
-Content-Type: text/disconnect-notice
+        write!(protocol, "Content-Type: text/disconnect-notice
 Content-Length: 67
 
 Disconnected, goodbye.
 See you at ClueCon! http://www.cluecon.com/").unwrap();
+        protocol.set_position(0);
+
+        let conn = Connection::new(protocol);
+        let mut client = Client::new(conn);
+
+        let event = client.pull_event();
+        assert_eq!(true, event.is_err());
+    }
+
+    #[test]
+    fn it_handle_socket_disconnection_from_server() {
+        use std::io::Cursor;
+        let mut protocol = Cursor::new(vec![0; 512]);
+        write!(protocol, "").unwrap();
         protocol.set_position(0);
 
         let conn = Connection::new(protocol);

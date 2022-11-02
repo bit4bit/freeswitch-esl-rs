@@ -105,6 +105,7 @@ fn header_parse(content: String) -> Header {
             !line.is_empty()
         })
         .for_each(|line| {
+
             let mut item = line.splitn(2, ':');
             // TODO una libreria deberia hacer esto? pues no ome
             let key = item.next().unwrap().trim().to_string();
@@ -124,16 +125,20 @@ impl Pdu {
         }
     }
 
-    fn get(&self, k: &str) -> String {
-        match self.inner_header.get(k) {
-            Some(v) => v.to_string(),
-            None => "".to_string()
-        }
+    pub fn is_empty(&self) -> bool {
+        self.content.len() == 0
     }
 
     // Parse Pdu to another type.
     pub fn parse<F: FromPdu>(&self) -> Result<F, F::Err> {
         FromPdu::from_pdu(self)
+    }
+
+    fn get(&self, k: &str) -> String {
+        match self.inner_header.get(k) {
+            Some(v) => v.to_string(),
+            None => "".to_string()
+        }
     }
 }
 
@@ -175,13 +180,20 @@ impl PduParser {
     }
 
     fn get_header_content(reader: &mut impl io::BufRead) -> io::Result<Vec<u8>> {
-        let mut raw: Vec<u8> = Vec::new();
-        let mut buf: Vec<u8> = Vec::new();
+        let mut raw: Vec<u8> = Vec::with_capacity(1024);
+        let mut buf: Vec<u8> = Vec::with_capacity(1024);
 
         loop {
             buf.clear();
             let readed_bytes = reader.read_until(b'\n', &mut buf)?;
-            if readed_bytes == 1 && buf[0] == b'\n' {
+
+            if readed_bytes == 0 {
+                // necesitamos reflejar el tamano
+                // de lo contraro raw queda inicializado
+                // en el tamano de la capacidad
+                raw.truncate(0);
+                break;
+            } else if readed_bytes == 1 && buf[0] == b'\n' {
                 break;
             } else {
                 raw.append(&mut buf);
