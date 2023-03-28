@@ -220,6 +220,13 @@ impl Event {
     pub fn len(&self) -> usize {
         self.length
     }
+
+}
+
+impl Into<Header> for Event {
+    fn into(self) -> Header {
+        self.inner.clone()
+    }
 }
 
 impl FromPdu for Event {
@@ -235,5 +242,21 @@ impl FromPdu for Event {
         } else {
             Err(ParseError::FromPduError(FromPduError("invalid content-type expected text/event-plain")))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_event_into_hashmap() -> Result<(), &'static str> {
+        let mut header = Header::new();
+        header.insert("Event-Name".to_string(), "TEST".to_string());
+        let event = Event{inner: header.clone(), length: 99};
+
+        let new_header: Header = event.into();
+        assert_eq!(header, new_header);
+        Ok(())
     }
 }
