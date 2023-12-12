@@ -107,9 +107,7 @@ impl<C: Connectioner> Client<C> {
     pub fn api(&mut self, cmd: &str, arg: &str) -> Result<String, ClientError> {
         self.send_command(format_args!("api {} {}", cmd, arg))?;
 
-        let pdu = self.wait_for_api_response()?;
-        let response: String = pdu.parse()?;
-        Ok(response)
+        Ok(self.wait_for_api_response()?.parse()?)
     }
 
     pub fn auth(&mut self, pass: &str) -> Result<(), &'static str> {
